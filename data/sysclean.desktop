@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SysClean
+GenericName=Package Manager
+Comment=System maintenance and package dependency manager
+Exec=sysclean
+Icon=sysclean
+Categories=System;PackageManager;
+Keywords=package;dependency;clean;maintenance;cache;orphan;
+Terminal=false
+StartupNotify=true
