@@ -37,11 +37,15 @@ jobs:
       - name: Build
         run: cargo build --release
 
+      - name: Verify binary
+        run: ls -la target/release/sysclean
+
       - name: Package tarball
         run: |
           mkdir -p dist/sysclean
           cp target/release/sysclean dist/sysclean/
           cp data/sysclean.desktop dist/sysclean/
+          cp icons/sysclean.svg dist/sysclean/
           cp README.md dist/sysclean/
           cd dist && tar czf ../sysclean-x86_64.tar.gz sysclean
 

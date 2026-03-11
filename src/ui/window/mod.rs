@@ -3,6 +3,7 @@ mod imp;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use adw::prelude::*;
 
 use crate::model::removal_plan::RemovalPlan;
 use crate::scanner::registry::{self, ScanProgress, ScanResult};
@@ -75,16 +76,6 @@ impl Window {
                 self.set_status(&msg);
             }
 
-            ScanProgress::BuildingLayout => {
-                if let Some(ref bar) = *imp.progress_bar.borrow() {
-                    bar.set_fraction(0.9);
-                }
-                if let Some(ref lbl) = *imp.progress_label.borrow() {
-                    lbl.set_label("Building graph layout...");
-                }
-                self.set_status("Building graph layout...");
-            }
-
             ScanProgress::Complete(result) => {
                 self.on_scan_complete(result);
             }
@@ -106,10 +97,12 @@ impl Window {
         // Store final dep tree
         *imp.dep_tree.borrow_mut() = Some(result.dep_tree);
         imp.selected_ids.borrow_mut().clear();
+        imp.explicit_ids.borrow_mut().clear();
 
-        // Apply final graph layout
+        // Build and apply graph layout (also clears stale visual state)
         if let Some(ref gv) = *imp.graph_view.borrow() {
-            gv.set_layout(result.graph_layout);
+            gv.orphan_preview.borrow_mut().clear();
+            gv.rebuild_layout();
         }
 
         // Hide progress bar
@@ -189,6 +182,27 @@ impl Window {
                 window.start_scan();
             } else {
                 window.set_status("Removal finished with errors");
+                // Show error details in a dialog
+                let detail_text = output.join("\n");
+                let dialog = adw::AlertDialog::new(
+                    Some("Removal finished with errors"),
+                    Some("One or more commands failed. See details below."),
+                );
+                let text_view = gtk::TextView::new();
+                text_view.set_editable(false);
+                text_view.set_monospace(true);
+                text_view.set_wrap_mode(gtk::WrapMode::WordChar);
+                text_view.buffer().set_text(&detail_text);
+                text_view.add_css_class("card");
+                let scroll = gtk::ScrolledWindow::new();
+                scroll.set_child(Some(&text_view));
+                scroll.set_min_content_height(300);
+                scroll.set_min_content_width(500);
+                dialog.set_extra_child(Some(&scroll));
+                dialog.add_response("ok", "OK");
+                dialog.set_default_response(Some("ok"));
+                dialog.set_close_response("ok");
+                dialog.present(Some(&window));
             }
         });
     }

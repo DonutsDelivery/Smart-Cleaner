@@ -1,7 +1,11 @@
 [package]
-name = "smart-cleaner"
+name = "sysclean"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "sysclean"
+path = "src/main.rs"
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.11" }

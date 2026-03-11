@@ -19,8 +19,11 @@ pub struct PackageInfo {
     pub installed_size: u64,
     pub depends: Vec<String>,
     pub required_by: Vec<String>,
+    pub provides: Vec<String>,
     pub is_explicit: bool,
+    pub is_protected: bool,
     pub install_path: Option<PathBuf>,
+    pub install_date: Option<i64>,
 }
 
 impl PackageInfo {
@@ -41,7 +44,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PackageObject {
-        const NAME: &'static str = "SmartCleanerPackageObject";
+        const NAME: &'static str = "SysCleanPackageObject";
         type Type = super::PackageObject;
     }
 

@@ -21,14 +21,9 @@ pub fn execute_removal(
                     cmd.source,
                     cmd.packages.join(", ")
                 ));
-                output_lines.push(format!("$ {}", cmd.command));
+                output_lines.push(format!("$ {}", cmd.display));
 
-                let parts: Vec<&str> = cmd.command.split_whitespace().collect();
-                if parts.is_empty() {
-                    continue;
-                }
-
-                let result = Command::new(parts[0]).args(&parts[1..]).output();
+                let result = Command::new(&cmd.program).args(&cmd.args).output();
 
                 match result {
                     Ok(output) => {

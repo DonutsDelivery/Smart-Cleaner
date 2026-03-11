@@ -13,7 +13,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Application {
-        const NAME: &'static str = "SmartCleanerApplication";
+        const NAME: &'static str = "SysCleanApplication";
         type Type = super::Application;
         type ParentType = adw::Application;
     }

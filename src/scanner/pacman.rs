@@ -99,6 +99,8 @@ fn parse_package_block(
     let mut installed_size: u64 = 0;
     let mut depends = Vec::new();
     let mut required_by = Vec::new();
+    let mut provides = Vec::new();
+    let mut install_date: Option<i64> = None;
 
     // Track the current field for multi-line values
     let mut current_field = String::new();
@@ -119,6 +121,8 @@ fn parse_package_block(
                 &mut installed_size,
                 &mut depends,
                 &mut required_by,
+                &mut provides,
+                &mut install_date,
             );
 
             current_field = key.to_string();
@@ -142,6 +146,8 @@ fn parse_package_block(
         &mut installed_size,
         &mut depends,
         &mut required_by,
+        &mut provides,
+        &mut install_date,
     );
 
     if name.is_empty() {
@@ -167,8 +173,11 @@ fn parse_package_block(
         installed_size,
         depends,
         required_by,
+        provides,
         is_explicit,
+        is_protected: false,
         install_path: None,
+        install_date,
     })
 }
 
@@ -181,12 +190,15 @@ fn process_field(
     installed_size: &mut u64,
     depends: &mut Vec<String>,
     required_by: &mut Vec<String>,
+    provides: &mut Vec<String>,
+    install_date: &mut Option<i64>,
 ) {
     match field {
         "Name" => *name = value.to_string(),
         "Version" => *version = value.to_string(),
         "Description" => *description = value.to_string(),
         "Installed Size" => *installed_size = parse_size(value),
+        "Install Date" => *install_date = parse_install_date(value),
         "Depends On" => {
             if value != "None" {
                 *depends = value
@@ -206,8 +218,81 @@ fn process_field(
                 *required_by = value.split_whitespace().map(|s| s.to_string()).collect();
             }
         }
+        "Provides" => {
+            if value != "None" {
+                *provides = value
+                    .split_whitespace()
+                    .map(|s| {
+                        // Strip version constraints: "python3=3.12.3" -> "python3"
+                        s.split(|c: char| c == '>' || c == '<' || c == '=')
+                            .next()
+                            .unwrap_or(s)
+                            .to_string()
+                    })
+                    .collect();
+            }
+        }
         _ => {}
     }
+}
+
+/// Parse pacman install date: "Thu 27 Feb 2025 03:45:12 PM UTC" → Unix timestamp
+fn parse_install_date(s: &str) -> Option<i64> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 6 {
+        return None;
+    }
+
+    let day: i64 = parts[1].parse().ok()?;
+    let month: i64 = match parts[2] {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: i64 = parts[3].parse().ok()?;
+
+    let time_parts: Vec<&str> = parts[4].split(':').collect();
+    if time_parts.len() != 3 {
+        return None;
+    }
+    let mut hour: i64 = time_parts[0].parse().ok()?;
+    let min: i64 = time_parts[1].parse().ok()?;
+    let sec: i64 = time_parts[2].parse().ok()?;
+
+    if parts.len() > 5 {
+        match parts[5] {
+            "PM" if hour != 12 => hour += 12,
+            "AM" if hour == 12 => hour = 0,
+            _ => {}
+        }
+    }
+
+    let is_leap = |y: i64| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let mut total_days: i64 = 0;
+    for y in 1970..year {
+        total_days += if is_leap(y) { 366 } else { 365 };
+    }
+    let days_in_month = [
+        0, 31,
+        28 + if is_leap(year) { 1 } else { 0 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    for m in 1..month {
+        total_days += days_in_month[m as usize];
+    }
+    total_days += day - 1;
+
+    Some(total_days * 86400 + hour * 3600 + min * 60 + sec)
 }
 
 fn parse_size(s: &str) -> u64 {
@@ -228,4 +313,45 @@ fn parse_size(s: &str) -> u64 {
     };
 
     (num * multiplier) as u64
+}
+
+/// Get package names that should be protected from removal.
+/// Includes: `base` and its dependencies, the kernel, and the package manager.
+pub fn get_protected_package_names() -> HashSet<String> {
+    let mut protected = HashSet::new();
+
+    // Always protect base itself
+    protected.insert("base".to_string());
+
+    // Get direct deps of base
+    if let Ok(output) = Command::new("pacman").args(["-Qi", "base"]).output() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            if line.starts_with("Depends On") {
+                if let Some(deps) = line.split(':').nth(1) {
+                    for dep in deps.split_whitespace() {
+                        // Strip version constraints like >=2.0
+                        let name = dep.split(|c| c == '>' || c == '<' || c == '=')
+                            .next()
+                            .unwrap_or(dep);
+                        if !name.is_empty() && name != "None" {
+                            protected.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Protect the kernel
+    protected.insert("linux".to_string());
+    protected.insert("linux-headers".to_string());
+    protected.insert("linux-firmware".to_string());
+
+    // Protect the package manager itself
+    protected.insert("pacman".to_string());
+    protected.insert("yay".to_string());
+    protected.insert("paru".to_string());
+
+    protected
 }

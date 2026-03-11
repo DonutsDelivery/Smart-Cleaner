@@ -55,8 +55,11 @@ impl PackageScanner for FlatpakScanner {
                 installed_size: parse_flatpak_size(size_str),
                 depends: Vec::new(),
                 required_by: Vec::new(),
+                provides: Vec::new(),
                 is_explicit: true,
+                is_protected: false,
                 install_path: None,
+                install_date: None,
             });
         }
 

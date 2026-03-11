@@ -189,7 +189,7 @@ impl MaintenanceView {
                         // Run each user command individually for proper error tracking
                         for (label, cmd) in &user_cmds {
                             eprintln!("CLEAN [user]: {label} => {cmd}");
-                            let result = std::process::Command::new("sh")
+                            let result = std::process::Command::new("bash")
                                 .args(["-c", cmd])
                                 .output();
                             match result {
@@ -218,7 +218,7 @@ impl MaintenanceView {
                                 .join("\n");
                             eprintln!("CLEAN [root] script:\n{script}");
                             let result = std::process::Command::new("pkexec")
-                                .args(["sh", "-c", &script])
+                                .args(["bash", "-c", &script])
                                 .output();
                             match result {
                                 Ok(output) => {

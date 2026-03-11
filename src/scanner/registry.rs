@@ -7,7 +7,6 @@ use gtk::glib;
 use crate::model::dep_tree::DependencyTree;
 use crate::model::package::PackageInfo;
 use crate::model::package_source::PackageSource;
-use crate::ui::graph_layout::GraphLayout;
 
 use super::appimage::AppImageScanner;
 use super::desktop_entries;
@@ -19,7 +18,6 @@ use super::PackageScanner;
 pub struct ScanResult {
     pub packages: Vec<PackageInfo>,
     pub dep_tree: DependencyTree,
-    pub graph_layout: GraphLayout,
     pub source_counts: HashMap<PackageSource, usize>,
     pub errors: Vec<String>,
 }
@@ -35,8 +33,6 @@ pub enum ScanProgress {
     },
     /// Enrichment / desktop scanner phase.
     Enriching(String),
-    /// Building graph layout.
-    BuildingLayout,
     /// All done — final result.
     Complete(ScanResult),
     /// A scanner produced an error.
@@ -66,7 +62,7 @@ pub fn scan_all_progressive(on_progress: impl Fn(ScanProgress) + 'static) {
             Box::new(AppImageScanner),
         ];
 
-        let total_steps = scanners.len() + 3; // +enrichment +desktop_scanner +layout
+        let total_steps = scanners.len() + 2; // +enrichment +desktop_scanner
         let mut all_packages: Vec<PackageInfo> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
         let mut step = 0;
@@ -130,21 +126,20 @@ pub fn scan_all_progressive(on_progress: impl Fn(ScanProgress) + 'static) {
         }
         step += 1;
 
-        // Build layout
-        let _ = tx.send(ScanProgress::BuildingLayout);
-
         let mut source_counts: HashMap<PackageSource, usize> = HashMap::new();
         for pkg in &all_packages {
             *source_counts.entry(pkg.source).or_default() += 1;
         }
 
-        let dep_tree = DependencyTree::build(all_packages.clone());
-        let graph_layout = GraphLayout::build(&dep_tree);
+        let mut dep_tree = DependencyTree::build(all_packages.clone());
+
+        // Mark critical system packages as protected from removal
+        let protected = crate::scanner::pacman::get_protected_package_names();
+        dep_tree.mark_protected(&protected);
 
         let _ = tx.send(ScanProgress::Complete(ScanResult {
             packages: all_packages,
             dep_tree,
-            graph_layout,
             source_counts,
             errors,
         }));

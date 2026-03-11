@@ -14,6 +14,7 @@ use crate::ui::maintenance_view::MaintenanceView;
 pub struct Window {
     pub dep_tree: Rc<RefCell<Option<DependencyTree>>>,
     pub selected_ids: Rc<RefCell<HashSet<String>>>,
+    pub explicit_ids: Rc<RefCell<HashSet<String>>>,
     pub enabled_sources: Rc<RefCell<HashSet<PackageSource>>>,
 
     // UI widgets
@@ -46,6 +47,7 @@ impl Default for Window {
         Self {
             dep_tree: Rc::new(RefCell::new(None)),
             selected_ids: Rc::new(RefCell::new(HashSet::new())),
+            explicit_ids: Rc::new(RefCell::new(HashSet::new())),
             enabled_sources: Rc::new(RefCell::new(all_sources)),
             main_stack: RefCell::new(None),
             view_stack: RefCell::new(None),
@@ -63,7 +65,7 @@ impl Default for Window {
 
 #[glib::object_subclass]
 impl ObjectSubclass for Window {
-    const NAME: &'static str = "SmartCleanerWindow";
+    const NAME: &'static str = "SysCleanWindow";
     type Type = super::Window;
     type ParentType = adw::ApplicationWindow;
 }
@@ -110,8 +112,9 @@ impl ObjectImpl for Window {
         // Graph view
         let dep_tree = self.dep_tree.clone();
         let selected_ids = self.selected_ids.clone();
+        let explicit_ids = self.explicit_ids.clone();
         let window_for_sel = window.clone();
-        let graph_view = GraphView::new(dep_tree, selected_ids, move || {
+        let graph_view = GraphView::new(dep_tree, selected_ids, explicit_ids, move || {
             window_for_sel.update_status_bar();
         });
 

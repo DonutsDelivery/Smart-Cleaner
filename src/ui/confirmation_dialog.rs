@@ -16,7 +16,7 @@ pub fn show_confirmation(
             plan.total_packages()
         )),
         Some(&format!(
-            "This will free approximately {}.",
+            "This will free approximately {}.\nOrphaned dependencies will be cleaned up automatically by pacman.",
             bytesize::ByteSize(plan.total_size)
         )),
     );

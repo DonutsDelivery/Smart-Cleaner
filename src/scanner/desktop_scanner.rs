@@ -37,21 +37,16 @@ impl DesktopEntryScanner {
         }
     }
 
-    fn is_claimed(&self, desktop_id: &str, exec_binary: &str, name: &str) -> bool {
+    fn is_claimed(&self, desktop_id: &str, exec_binary: &str, _name: &str) -> bool {
         let id_lower = desktop_id.to_lowercase();
         let exec_lower = exec_binary.to_lowercase();
-        let name_lower = name.to_lowercase();
 
-        // Check if any existing package matches by name, desktop ID, or binary
+        // Only filter true duplicates:
+        // 1. Exact desktop_id match (e.g. flatpak "com.spotify.Client" == desktop file stem)
+        // 2. Binary already provided by another scanner (appimage, flatpak)
+        // Note: pacman-owned .desktop files are already filtered by pacman_owned_desktop_files()
         self.known_packages.contains(&id_lower)
-            || self.known_packages.contains(&name_lower)
-            || self.known_packages.contains(&exec_lower)
             || self.known_binaries.contains(&exec_lower)
-            // Also check common patterns: org.foo.Bar → bar
-            || id_lower
-                .rsplit('.')
-                .next()
-                .is_some_and(|last| self.known_packages.contains(last))
     }
 }
 
@@ -70,6 +65,7 @@ impl PackageScanner for DesktopEntryScanner {
 
     fn scan_blocking(&self) -> Result<Vec<PackageInfo>, ScanError> {
         let dirs = desktop_dirs();
+        let pacman_owned = pacman_owned_desktop_files();
         let mut packages = Vec::new();
         let mut seen_ids = HashSet::new();
 
@@ -85,6 +81,10 @@ impl PackageScanner for DesktopEntryScanner {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().is_some_and(|ext| ext == "desktop") {
+                    // Skip .desktop files owned by pacman packages
+                    if pacman_owned.contains(&path) {
+                        continue;
+                    }
                     if let Some(pkg) = self.parse_desktop_entry(&path, &mut seen_ids) {
                         packages.push(pkg);
                     }
@@ -175,13 +175,20 @@ impl DesktopEntryScanner {
         // Determine install path from Exec line
         let install_path = if !exec.is_empty() {
             let exec_path = exec.split_whitespace().next().unwrap_or("");
-            // Remove field codes like %u %f etc
             let p = Path::new(exec_path);
             if p.is_absolute() {
-                Some(p.to_path_buf())
+                if p.exists() {
+                    Some(p.to_path_buf())
+                } else {
+                    // Binary doesn't exist — stale .desktop file
+                    return None;
+                }
             } else {
                 // Try to resolve via which
-                which::which(exec_path).ok()
+                match which::which(exec_path) {
+                    Ok(resolved) => Some(resolved),
+                    Err(_) => return None, // Binary not found — skip
+                }
             }
         } else {
             None
@@ -206,10 +213,36 @@ impl DesktopEntryScanner {
             installed_size,
             depends: Vec::new(),
             required_by: Vec::new(),
+            provides: Vec::new(),
             is_explicit: true, // Standalone — always a leaf node
+            is_protected: false,
             install_path,
+            install_date: None,
         })
     }
+}
+
+/// Get all .desktop files owned by any pacman package.
+/// This prevents the desktop scanner from claiming packages managed by pacman.
+fn pacman_owned_desktop_files() -> HashSet<PathBuf> {
+    let output = std::process::Command::new("bash")
+        .args(["-c", "pacman -Ql 2>/dev/null | grep '/applications/.*\\.desktop$'"])
+        .output()
+        .ok();
+
+    let Some(output) = output else {
+        return HashSet::new();
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .filter_map(|line| {
+            // Format: "package_name /path/to/file.desktop"
+            let (_, path) = line.split_once(' ')?;
+            Some(PathBuf::from(path))
+        })
+        .collect()
 }
 
 fn desktop_dirs() -> Vec<PathBuf> {

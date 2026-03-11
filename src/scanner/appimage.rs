@@ -114,7 +114,10 @@ fn appimage_to_package(path: &PathBuf) -> Option<PackageInfo> {
         installed_size: size,
         depends: Vec::new(),
         required_by: Vec::new(),
+        provides: Vec::new(),
         is_explicit: true,
+        is_protected: false,
         install_path: Some(path.clone()),
+        install_date: None,
     })
 }
