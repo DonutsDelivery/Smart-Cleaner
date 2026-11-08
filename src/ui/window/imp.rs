@@ -155,6 +155,10 @@ impl ObjectImpl for Window {
         // Assemble: header, progress bar, content, bottom bar
         let content_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
         content_box.set_vexpand(true);
+        // Package-cache cleanup only supports pacman for now; say so instead of skipping silently.
+        let pacman_notice = adw::Banner::new(crate::config::NO_PACMAN_NOTICE);
+        pacman_notice.set_revealed(!crate::scanner::pacman::is_installed());
+        content_box.append(&pacman_notice);
         content_box.append(&loading_box);
         content_box.append(&view_stack);
         content_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));

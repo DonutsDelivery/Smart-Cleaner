@@ -18,7 +18,7 @@ impl PackageScanner for PacmanScanner {
     }
 
     fn is_available(&self) -> bool {
-        which::which("pacman").is_ok()
+        is_installed()
     }
 
     fn scan_blocking(&self) -> Result<Vec<PackageInfo>, ScanError> {
@@ -27,6 +27,11 @@ impl PackageScanner for PacmanScanner {
         let packages = parse_pacman_qi(&explicit, &foreign)?;
         Ok(packages)
     }
+}
+
+/// True when the pacman binary is on PATH.
+pub fn is_installed() -> bool {
+    which::which("pacman").is_ok()
 }
 
 fn get_explicit_packages() -> Result<HashSet<String>, ScanError> {
