@@ -26,9 +26,9 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             items.push(MaintenanceItem {
                 id: "pacman-cache".into(),
                 category: "Package manager caches",
-                label: "Pacman cache (keep last 2 versions)".into(),
+                label: "Pacman cache (remove all versions)".into(),
                 size,
-                command: "pkexec paccache -rk2".into(),
+                command: "pkexec paccache -rk0".into(),
                 checked: false,
             });
         }
