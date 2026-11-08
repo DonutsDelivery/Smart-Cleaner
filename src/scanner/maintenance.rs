@@ -133,11 +133,11 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             items.push(MaintenanceItem {
                 id: "pacman-cache".into(),
                 category: "Package manager caches",
-                label: "Pacman cache (keep last 2 versions)".into(),
+                label: "Pacman cache (remove all versions)".into(),
                 size,
                 action: CleanAction::Run {
                     program: safe::PACCACHE,
-                    args: vec!["-rk2".into()],
+                    args: vec!["-rk0".into()],
                     privileged: true,
                 },
                 checked: false,

@@ -16,7 +16,8 @@ install: build
 		install -Dm644 icons/hicolor/$${s}x$${s}/apps/$(APP_ID).png \
 			"$(DESTDIR)$(PREFIX)/share/icons/hicolor/$${s}x$${s}/apps/$(APP_ID).png"; \
 	done
-	install -Dm644 data/$(APP_ID).desktop "$(DESTDIR)$(PREFIX)/share/applications/$(APP_ID).desktop"
+	install -d "$(DESTDIR)$(PREFIX)/share/applications"
+	sed 's|^Exec=.*|Exec=$(PREFIX)/bin/donutcleaner|' data/$(APP_ID).desktop > "$(DESTDIR)$(PREFIX)/share/applications/$(APP_ID).desktop"
 	install -Dm644 data/$(APP_ID).metainfo.xml "$(DESTDIR)$(PREFIX)/share/metainfo/$(APP_ID).metainfo.xml"
 	install -Dm644 LICENSE "$(DESTDIR)$(PREFIX)/share/licenses/donutcleaner/LICENSE"
 	# Remove files left by the old SysClean name
@@ -24,6 +25,7 @@ install: build
 		"$(DESTDIR)$(PREFIX)/share/applications/sysclean.desktop" \
 		"$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/sysclean.svg"
 	-gtk4-update-icon-cache -f "$(DESTDIR)$(PREFIX)/share/icons/hicolor" 2>/dev/null || true
+	-update-desktop-database "$(DESTDIR)$(PREFIX)/share/applications" 2>/dev/null || true
 
 run: install
 	nohup "$(PREFIX)/bin/donutcleaner" &>/dev/null &
