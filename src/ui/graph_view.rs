@@ -1009,10 +1009,68 @@ fn rebuild_layout_inner(
     let Some(ref tree) = *tree_ref else { return };
 
     let new_layout = GraphLayout::build(tree, filter, sort, depth, max_dep_fans, category_filter);
-    da.set_content_width((new_layout.canvas_width * zoom) as i32);
+    let new_width = (new_layout.canvas_width * zoom) as i32;
+    let width_changed = da.content_width() != new_width;
+    da.set_content_width(new_width);
     da.set_content_height((new_layout.canvas_height * zoom) as i32);
     *layout.borrow_mut() = Some(new_layout);
     da.queue_draw();
+    scroll_to_roots(da, layout, zoom, width_changed);
+}
+
+/// Scroll to the right edge, where the layout puts the root packages, and down to the
+/// first package there. The canvas is tall and the root columns start well below its
+/// top, so without this the view opens on empty space.
+fn scroll_to_roots(
+    da: &gtk::DrawingArea,
+    layout: &Rc<RefCell<Option<GraphLayout>>>,
+    zoom: f64,
+    width_changed: bool,
+) {
+    let Some(sw) = da
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+    else {
+        return;
+    };
+    let apply = {
+        let layout = layout.clone();
+        let sw = sw.clone();
+        move || {
+            let h = sw.hadjustment();
+            let v = sw.vadjustment();
+            h.set_value(h.upper() - h.page_size());
+            let left = h.value() / zoom;
+            let top = layout.borrow().as_ref().and_then(|l| {
+                l.node_positions
+                    .values()
+                    .filter(|&&(x, _)| x + NODE_WIDTH / 2.0 >= left)
+                    .map(|&(_, y)| y)
+                    .min_by(f64::total_cmp)
+            });
+            if let Some(y) = top {
+                v.set_value(((y - NODE_HEIGHT) * zoom).max(0.0));
+            }
+        }
+    };
+    if !width_changed {
+        apply();
+        return;
+    }
+    // The adjustments learn the new size only after the next allocation, which
+    // configures the horizontal one first; wait for idle so both are current.
+    let h = sw.hadjustment();
+    let handler: Rc<RefCell<Option<gtk::glib::SignalHandlerId>>> = Rc::default();
+    let handler_c = handler.clone();
+    let apply = Rc::new(apply);
+    let id = h.connect_changed(move |adj| {
+        if let Some(id) = handler_c.borrow_mut().take() {
+            adj.disconnect(id);
+        }
+        let apply = apply.clone();
+        gtk::glib::idle_add_local_once(move || apply());
+    });
+    *handler.borrow_mut() = Some(id);
 }
 
 /// Get the visible scroll region of a DrawingArea inside a ScrolledWindow.
