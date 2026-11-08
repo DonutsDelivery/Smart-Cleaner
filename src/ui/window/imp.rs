@@ -65,7 +65,7 @@ impl Default for Window {
 
 #[glib::object_subclass]
 impl ObjectSubclass for Window {
-    const NAME: &'static str = "SysCleanWindow";
+    const NAME: &'static str = "DonutCleanerWindow";
     type Type = super::Window;
     type ParentType = adw::ApplicationWindow;
 }

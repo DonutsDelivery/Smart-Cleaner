@@ -44,7 +44,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for PackageObject {
-        const NAME: &'static str = "SysCleanPackageObject";
+        const NAME: &'static str = "DonutCleanerPackageObject";
         type Type = super::PackageObject;
     }
 

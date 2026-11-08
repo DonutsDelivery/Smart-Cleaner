@@ -1,10 +1,13 @@
 [package]
-name = "sysclean"
+name = "donutcleaner"
 version = "0.1.0"
 edition = "2024"
+description = "Clean caches and remove unused packages on Linux"
+license = "MIT"
+repository = "https://github.com/DonutsDelivery/Smart-Cleaner"
 
 [[bin]]
-name = "sysclean"
+name = "donutcleaner"
 path = "src/main.rs"
 
 [dependencies]
