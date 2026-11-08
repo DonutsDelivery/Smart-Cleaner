@@ -38,24 +38,27 @@ jobs:
         run: cargo build --release
 
       - name: Verify binary
-        run: ls -la target/release/sysclean
+        run: ls -la target/release/donutcleaner
 
       - name: Package tarball
         run: |
-          mkdir -p dist/sysclean
-          cp target/release/sysclean dist/sysclean/
-          cp data/sysclean.desktop dist/sysclean/
-          cp icons/sysclean.svg dist/sysclean/
-          cp README.md dist/sysclean/
-          cd dist && tar czf ../sysclean-x86_64.tar.gz sysclean
+          mkdir -p dist/donutcleaner
+          cp target/release/donutcleaner dist/donutcleaner/
+          cp data/online.donutsdelivery.DonutCleaner.desktop dist/donutcleaner/
+          cp data/online.donutsdelivery.DonutCleaner.metainfo.xml dist/donutcleaner/
+          cp data/online.donutsdelivery.DonutCleaner.policy dist/donutcleaner/
+          cp icons/online.donutsdelivery.DonutCleaner.svg dist/donutcleaner/
+          cp -r icons/hicolor dist/donutcleaner/
+          cp README.md LICENSE dist/donutcleaner/
+          cd dist && tar czf ../donutcleaner-x86_64.tar.gz donutcleaner
 
       - name: Package standalone binary
-        run: cp target/release/sysclean sysclean-x86_64
+        run: cp target/release/donutcleaner donutcleaner-x86_64
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            sysclean-x86_64.tar.gz
-            sysclean-x86_64
+            donutcleaner-x86_64.tar.gz
+            donutcleaner-x86_64

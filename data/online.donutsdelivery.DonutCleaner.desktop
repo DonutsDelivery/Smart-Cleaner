@@ -1,11 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=SysClean
-GenericName=Package Manager
-Comment=System maintenance and package dependency manager
-Exec=sysclean
-Icon=sysclean
-Categories=System;PackageManager;
+Name=DonutCleaner
+GenericName=System Cleaner
+Comment=Clean caches and remove unused packages
+Exec=donutcleaner
+Icon=online.donutsdelivery.DonutCleaner
+Categories=System;PackageManager;GTK;
 Keywords=package;dependency;clean;maintenance;cache;orphan;
+StartupWMClass=online.donutsdelivery.DonutCleaner
 Terminal=false
 StartupNotify=true
