@@ -1,11 +1,13 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::gio;
 use gtk::glib;
 
-use crate::scanner::maintenance::{self, MaintenanceItem};
+use crate::remover::safe;
+use crate::scanner::maintenance::{self, MaintenanceItem, Prepared};
 
 pub struct MaintenanceView {
     pub widget: gtk::Box,
@@ -167,85 +169,44 @@ impl MaintenanceView {
                 glib::spawn_future_local(async move {
                     let total = checked.len();
                     let results = gio::spawn_blocking(move || {
-                        // Split into root (pkexec) and user commands
-                        let mut root_cmds: Vec<(String, String)> = Vec::new(); // (label, cmd without pkexec)
-                        let mut user_cmds: Vec<(String, String)> = Vec::new(); // (label, cmd)
-                        for item in &checked {
-                            if item.command.is_empty() {
-                                continue;
-                            }
-                            if item.command.starts_with("pkexec ") {
-                                root_cmds.push((
-                                    item.label.clone(),
-                                    item.command["pkexec ".len()..].to_string(),
-                                ));
-                            } else {
-                                user_cmds.push((item.label.clone(), item.command.clone()));
-                            }
-                        }
-
                         let mut outputs: Vec<(String, bool, String)> = Vec::new();
+                        // Privileged removals share one pkexec call (one auth prompt).
+                        let mut root_labels: Vec<String> = Vec::new();
+                        let mut root_paths: Vec<PathBuf> = Vec::new();
 
-                        // Run each user command individually for proper error tracking
-                        for (label, cmd) in &user_cmds {
-                            eprintln!("CLEAN [user]: {label} => {cmd}");
-                            let result = std::process::Command::new("bash")
-                                .args(["-c", cmd])
-                                .output();
-                            match result {
-                                Ok(output) => {
-                                    let success = output.status.success();
-                                    let stdout = String::from_utf8_lossy(&output.stdout);
-                                    let stderr = String::from_utf8_lossy(&output.stderr);
-                                    eprintln!("  exit={} stdout={} stderr={}", output.status, stdout.chars().take(200).collect::<String>(), stderr.chars().take(200).collect::<String>());
-                                    outputs.push((label.clone(), success, stderr.to_string()));
+                        for item in &checked {
+                            let label = item.label.clone();
+                            match item.action.prepare() {
+                                Err(e) => outputs.push((label, false, e)),
+                                Ok(None) => outputs.push((label, true, String::new())),
+                                Ok(Some(Prepared::Remove {
+                                    privileged: true,
+                                    paths,
+                                })) => {
+                                    root_labels.push(label);
+                                    root_paths.extend(paths);
                                 }
-                                Err(e) => {
-                                    eprintln!("  spawn error: {e}");
-                                    outputs.push((label.clone(), false, e.to_string()));
+                                Ok(Some(Prepared::Remove { privileged, paths })) => {
+                                    let (program, args) = safe::rm_command(privileged, &paths);
+                                    let (ok, err) = run_command(privileged, &program, &args);
+                                    outputs.push((label, ok, err));
+                                }
+                                Ok(Some(Prepared::Exec {
+                                    privileged,
+                                    program,
+                                    args,
+                                })) => {
+                                    let (ok, err) = run_command(privileged, &program, &args);
+                                    outputs.push((label, ok, err));
                                 }
                             }
                         }
 
-                        // Run all root commands under a single pkexec (one auth prompt)
-                        // Each command tracked with || markers so we know which failed
-                        if !root_cmds.is_empty() {
-                            let script = root_cmds
-                                .iter()
-                                .enumerate()
-                                .map(|(i, (_, cmd))| format!("{cmd} && echo __OK_{i}__", i = i, cmd = cmd))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            eprintln!("CLEAN [root] script:\n{script}");
-                            let result = std::process::Command::new("pkexec")
-                                .args(["bash", "-c", &script])
-                                .output();
-                            match result {
-                                Ok(output) => {
-                                    let code = output.status.code().unwrap_or(-1);
-                                    let stdout = String::from_utf8_lossy(&output.stdout);
-                                    let stderr = String::from_utf8_lossy(&output.stderr);
-                                    eprintln!("CLEAN [root] exit={code} stdout={stdout} stderr={stderr}");
-                                    if code == 126 || code == 127 {
-                                        for (label, _) in &root_cmds {
-                                            outputs.push((label.clone(), false, "Auth cancelled".into()));
-                                        }
-                                    } else {
-                                        let stdout = String::from_utf8_lossy(&output.stdout);
-                                        let stderr = String::from_utf8_lossy(&output.stderr);
-                                        for (i, (label, _)) in root_cmds.iter().enumerate() {
-                                            let marker = format!("__OK_{i}__");
-                                            let success = stdout.contains(&marker);
-                                            let err = if success { String::new() } else { stderr.to_string() };
-                                            outputs.push((label.clone(), success, err));
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    for (label, _) in &root_cmds {
-                                        outputs.push((label.clone(), false, e.to_string()));
-                                    }
-                                }
+                        if !root_labels.is_empty() {
+                            let (program, args) = safe::rm_command(true, &root_paths);
+                            let (ok, err) = run_command(true, &program, &args);
+                            for label in root_labels {
+                                outputs.push((label, ok, err.clone()));
                             }
                         }
 
@@ -281,6 +242,34 @@ impl MaintenanceView {
             status_label,
             clean_button,
             spinner,
+        }
+    }
+}
+
+/// Run one command as an argv list (through `pkexec` when privileged) and report
+/// success plus an error message. No shell is involved.
+fn run_command(privileged: bool, program: &str, args: &[String]) -> (bool, String) {
+    eprintln!(
+        "CLEAN [{}]: {program} {args:?}",
+        if privileged { "root" } else { "user" }
+    );
+    match safe::command(privileged, program, args).output() {
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            eprintln!(
+                "  exit={} stderr={}",
+                output.status,
+                stderr.chars().take(200).collect::<String>()
+            );
+            // pkexec exits 126 when the user dismisses the prompt, 127 when not authorized.
+            match output.status.code() {
+                Some(126) | Some(127) if privileged => (false, "Authorization cancelled".into()),
+                _ => (output.status.success(), stderr),
+            }
+        }
+        Err(e) => {
+            eprintln!("  spawn error: {e}");
+            (false, e.to_string())
         }
     }
 }

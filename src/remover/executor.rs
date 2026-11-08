@@ -23,6 +23,13 @@ pub fn execute_removal(
                 ));
                 output_lines.push(format!("$ {}", cmd.display));
 
+                if let Some(reason) = &cmd.refused {
+                    output_lines.push(format!("ERROR: Not removed: {reason}"));
+                    output_lines.push(String::new());
+                    all_success = false;
+                    continue;
+                }
+
                 let result = Command::new(&cmd.program).args(&cmd.args).output();
 
                 match result {

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use super::package::PackageInfo;
 use super::package_source::PackageSource;
+use crate::remover::safe;
 
 /// Groups packages by source for removal
 pub struct RemovalPlan {
@@ -54,19 +56,20 @@ impl RemovalPlan {
             match source {
                 PackageSource::Pacman | PackageSource::Aur => {
                     let names: Vec<String> = pkgs.iter().map(|p| p.name.clone()).collect();
+                    // "--" keeps a name that starts with "-" from being read as an option.
                     let mut args = vec![
-                        "pacman".to_string(),
                         "-Rns".to_string(),
                         "--noconfirm".to_string(),
+                        "--".to_string(),
                     ];
                     args.extend(names.clone());
-                    cmds.push(RemovalCommand {
-                        source: *source,
-                        display: format!("pkexec pacman -Rns --noconfirm {}", names.join(" ")),
-                        program: "pkexec".to_string(),
+                    cmds.push(RemovalCommand::new(
+                        *source,
+                        true,
+                        safe::PACMAN,
                         args,
-                        packages: names,
-                    });
+                        names,
+                    ));
                 }
                 PackageSource::Flatpak => {
                     for pkg in pkgs {
@@ -74,55 +77,63 @@ impl RemovalPlan {
                             source: *source,
                             display: format!("flatpak uninstall -y {}", pkg.name),
                             program: "flatpak".to_string(),
-                            args: vec!["uninstall".to_string(), "-y".to_string(), pkg.name.clone()],
+                            args: vec![
+                                "uninstall".to_string(),
+                                "-y".to_string(),
+                                "--".to_string(),
+                                pkg.name.clone(),
+                            ],
                             packages: vec![pkg.name.clone()],
+                            refused: None,
                         });
                     }
                 }
                 PackageSource::AppImage | PackageSource::Wine | PackageSource::Desktop => {
-                    let mut root_paths: Vec<String> = Vec::new();
+                    let mut root_paths: Vec<PathBuf> = Vec::new();
                     let mut root_names: Vec<String> = Vec::new();
-                    let mut user_paths: Vec<String> = Vec::new();
+                    let mut user_paths: Vec<PathBuf> = Vec::new();
                     let mut user_names: Vec<String> = Vec::new();
 
                     for pkg in pkgs {
-                        if let Some(path) = &pkg.install_path {
-                            let path_str = path.display().to_string();
-                            let needs_root = path.starts_with("/opt")
-                                || path.starts_with("/usr")
-                                || path.starts_with("/bin")
-                                || path.starts_with("/sbin");
-                            if needs_root {
-                                root_paths.push(path_str);
-                                root_names.push(pkg.name.clone());
-                            } else {
-                                user_paths.push(path_str);
-                                user_names.push(pkg.name.clone());
+                        let Some(path) = &pkg.install_path else {
+                            continue;
+                        };
+                        // Resolve and sanity-check the path before it reaches `rm`.
+                        let path = match safe::check_app_target(path) {
+                            Ok(p) => p,
+                            Err(reason) => {
+                                cmds.push(RemovalCommand::refused(
+                                    *source,
+                                    pkg.name.clone(),
+                                    reason,
+                                ));
+                                continue;
                             }
+                        };
+                        let needs_root = path.starts_with("/opt")
+                            || path.starts_with("/usr")
+                            || path.starts_with("/bin")
+                            || path.starts_with("/sbin");
+                        if needs_root {
+                            root_paths.push(path);
+                            root_names.push(pkg.name.clone());
+                        } else {
+                            user_paths.push(path);
+                            user_names.push(pkg.name.clone());
                         }
                     }
 
                     if !root_paths.is_empty() {
-                        let mut args = vec!["rm".to_string(), "-rf".to_string()];
-                        args.extend(root_paths.clone());
-                        cmds.push(RemovalCommand {
-                            source: *source,
-                            display: format!("pkexec rm -rf {}", root_paths.join(" ")),
-                            program: "pkexec".to_string(),
-                            args,
-                            packages: root_names,
-                        });
+                        let (program, args) = safe::rm_command(true, &root_paths);
+                        cmds.push(RemovalCommand::new(
+                            *source, true, &program, args, root_names,
+                        ));
                     }
                     if !user_paths.is_empty() {
-                        let mut args = vec!["-rf".to_string()];
-                        args.extend(user_paths.clone());
-                        cmds.push(RemovalCommand {
-                            source: *source,
-                            display: format!("rm -rf {}", user_paths.join(" ")),
-                            program: "rm".to_string(),
-                            args,
-                            packages: user_names,
-                        });
+                        let (program, args) = safe::rm_command(false, &user_paths);
+                        cmds.push(RemovalCommand::new(
+                            *source, false, &program, args, user_names,
+                        ));
                     }
                 }
                 PackageSource::Snap => {
@@ -131,14 +142,16 @@ impl RemovalPlan {
                             source: *source,
                             display: format!("snap remove {}", pkg.name),
                             program: "snap".to_string(),
-                            args: vec!["remove".to_string(), pkg.name.clone()],
+                            args: vec!["remove".to_string(), "--".to_string(), pkg.name.clone()],
                             packages: vec![pkg.name.clone()],
+                            refused: None,
                         });
                     }
                 }
                 PackageSource::Pip => {
                     let names: Vec<String> = pkgs.iter().map(|p| p.name.clone()).collect();
-                    let mut args = vec!["uninstall".to_string(), "-y".to_string()];
+                    let mut args =
+                        vec!["uninstall".to_string(), "-y".to_string(), "--".to_string()];
                     args.extend(names.clone());
                     cmds.push(RemovalCommand {
                         source: *source,
@@ -146,11 +159,13 @@ impl RemovalPlan {
                         program: "pip".to_string(),
                         args,
                         packages: names,
+                        refused: None,
                     });
                 }
                 PackageSource::Npm => {
                     let names: Vec<String> = pkgs.iter().map(|p| p.name.clone()).collect();
-                    let mut args = vec!["uninstall".to_string(), "-g".to_string()];
+                    let mut args =
+                        vec!["uninstall".to_string(), "-g".to_string(), "--".to_string()];
                     args.extend(names.clone());
                     cmds.push(RemovalCommand {
                         source: *source,
@@ -158,6 +173,7 @@ impl RemovalPlan {
                         program: "npm".to_string(),
                         args,
                         packages: names,
+                        refused: None,
                     });
                 }
                 PackageSource::Cargo => {
@@ -166,8 +182,9 @@ impl RemovalPlan {
                             source: *source,
                             display: format!("cargo uninstall {}", pkg.name),
                             program: "cargo".to_string(),
-                            args: vec!["uninstall".to_string(), pkg.name.clone()],
+                            args: vec!["uninstall".to_string(), "--".to_string(), pkg.name.clone()],
                             packages: vec![pkg.name.clone()],
+                            refused: None,
                         });
                     }
                 }
@@ -187,4 +204,51 @@ pub struct RemovalCommand {
     /// Arguments (each element is one argument, handles spaces correctly)
     pub args: Vec<String>,
     pub packages: Vec<String>,
+    /// Set when the target failed a safety check. The executor reports it and runs nothing.
+    pub refused: Option<String>,
+}
+
+impl RemovalCommand {
+    /// Build a command from a program and its arguments. A privileged command runs as
+    /// `pkexec <program> <args>`; `display` shows exactly that argv.
+    pub fn new(
+        source: PackageSource,
+        privileged: bool,
+        program: &str,
+        args: Vec<String>,
+        packages: Vec<String>,
+    ) -> Self {
+        let (program, args) = safe::argv(privileged, program, &args);
+        let display = std::iter::once(program.as_str())
+            .chain(args.iter().map(String::as_str))
+            .map(|a| {
+                if a.contains(char::is_whitespace) {
+                    format!("{a:?}")
+                } else {
+                    a.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        Self {
+            source,
+            display,
+            program,
+            args,
+            packages,
+            refused: None,
+        }
+    }
+
+    /// A removal that was blocked before running.
+    pub fn refused(source: PackageSource, package: String, reason: String) -> Self {
+        Self {
+            source,
+            display: format!("(not run) {package}"),
+            program: String::new(),
+            args: Vec::new(),
+            packages: vec![package],
+            refused: Some(reason),
+        }
+    }
 }

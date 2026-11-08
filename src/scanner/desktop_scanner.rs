@@ -225,8 +225,9 @@ impl DesktopEntryScanner {
 /// Get all .desktop files owned by any pacman package.
 /// This prevents the desktop scanner from claiming packages managed by pacman.
 fn pacman_owned_desktop_files() -> HashSet<PathBuf> {
-    let output = std::process::Command::new("bash")
-        .args(["-c", "pacman -Ql 2>/dev/null | grep '/applications/.*\\.desktop$'"])
+    // No shell: run pacman directly and filter the lines here.
+    let output = std::process::Command::new("pacman")
+        .arg("-Ql")
         .output()
         .ok();
 
@@ -240,6 +241,9 @@ fn pacman_owned_desktop_files() -> HashSet<PathBuf> {
         .filter_map(|line| {
             // Format: "package_name /path/to/file.desktop"
             let (_, path) = line.split_once(' ')?;
+            if !path.contains("/applications/") || !path.ends_with(".desktop") {
+                return None;
+            }
             Some(PathBuf::from(path))
         })
         .collect()
