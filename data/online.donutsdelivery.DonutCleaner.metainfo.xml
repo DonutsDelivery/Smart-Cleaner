@@ -37,10 +37,11 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.1.0" date="2026-11-08">
+    <release version="0.2.0" date="2026-11-08">
       <description>
-        <p>First release as DonutCleaner, formerly SysClean.</p>
+        <p>First release as DonutCleaner, formerly SysClean. Cleanup commands now pass each path as its own argument.</p>
       </description>
     </release>
+    <release version="0.1.0" date="2026-03-11"/>
   </releases>
 </component>
