@@ -9,7 +9,7 @@ use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
 pub const PKEXEC: &str = "pkexec";
-/// Absolute program paths. The polkit policy in `data/` matches these exactly.
+/// Absolute program paths, so pkexec always runs the system binary.
 pub const RM: &str = "/usr/bin/rm";
 pub const PACMAN: &str = "/usr/bin/pacman";
 pub const PACCACHE: &str = "/usr/bin/paccache";

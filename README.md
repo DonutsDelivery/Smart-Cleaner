@@ -14,7 +14,7 @@ System package cleanup (pacman cache, orphaned packages, package removal) works 
 
 ## Administrator rights
 
-Anything that needs root runs through polkit as a plain program call (`pkexec /usr/bin/rm`, `/usr/bin/pacman`, `/usr/bin/paccache`, `/usr/bin/journalctl`), never through a shell. `make install` installs `online.donutsdelivery.DonutCleaner.policy` into `/usr/share/polkit-1/actions` so the password prompt says what DonutCleaner is asking for. Paths are resolved and checked before they are passed to `rm`.
+Anything that needs root runs through polkit as a plain program call (`pkexec /usr/bin/rm`, `/usr/bin/pacman`, `/usr/bin/paccache`, `/usr/bin/journalctl`), never through a shell. Paths are resolved and checked before they are passed to `rm`.
 
 ## Download
 
@@ -33,8 +33,6 @@ chmod +x donutcleaner-x86_64
 ./donutcleaner-x86_64
 ```
 
-The standalone binary has no polkit policy, so the password prompt will name the program (`rm`, `pacman`) instead of DonutCleaner. Copy `online.donutsdelivery.DonutCleaner.policy` from the tarball to `/usr/share/polkit-1/actions` to fix that.
-
 ## Dependencies
 
 - GTK4
@@ -47,7 +45,7 @@ The standalone binary has no polkit policy, so the password prompt will name the
 # Install build dependencies (Arch Linux)
 sudo pacman -S gtk4 libadwaita rust
 
-# Build and install (asks for sudo once, to install the polkit policy)
+# Build and install
 make install
 ```
 

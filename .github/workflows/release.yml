@@ -46,7 +46,6 @@ jobs:
           cp target/release/donutcleaner dist/donutcleaner/
           cp data/online.donutsdelivery.DonutCleaner.desktop dist/donutcleaner/
           cp data/online.donutsdelivery.DonutCleaner.metainfo.xml dist/donutcleaner/
-          cp data/online.donutsdelivery.DonutCleaner.policy dist/donutcleaner/
           cp icons/online.donutsdelivery.DonutCleaner.svg dist/donutcleaner/
           cp -r icons/hicolor dist/donutcleaner/
           cp README.md LICENSE dist/donutcleaner/
