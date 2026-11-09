@@ -11,10 +11,10 @@ use adw::prelude::*;
 use crate::remover::helper;
 use crate::ui::window::Window;
 
-const BODY: &str = "DonutCleaner does package removal and system cleanup through a helper \
-program and a polkit policy that live in system folders. This copy cannot install them \
-itself. Scanning and cleaning inside your home folder work without them. To turn on the \
-rest, run these commands once in a terminal.";
+const BODY: &str = "Package removal and system cleanup go through a small helper program and a \
+polkit policy. Both belong in system folders, and this copy has no write access there. \
+Scanning and cleaning inside your home folder work as they are. For the rest, run these \
+commands once in a terminal.";
 
 fn marker_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -46,7 +46,7 @@ pub fn maybe_show(window: &Window) {
     let appimage = std::env::var("APPIMAGE").ok().filter(|p| !p.is_empty());
     let steps = helper::install_steps(appimage.as_deref());
 
-    let dialog = adw::AlertDialog::new(Some("Administrator helper not installed"), Some(BODY));
+    let dialog = adw::AlertDialog::new(Some("Set up administrator access"), Some(BODY));
     let text_view = gtk::TextView::new();
     text_view.set_editable(false);
     text_view.set_monospace(true);
