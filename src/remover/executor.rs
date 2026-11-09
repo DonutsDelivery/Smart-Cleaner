@@ -4,6 +4,7 @@ use gtk::gio;
 use gtk::glib;
 
 use crate::model::removal_plan::RemovalCommand;
+use crate::remover::helper;
 
 /// Execute removal commands in a background thread, callback on main thread
 pub fn execute_removal(
@@ -27,6 +28,19 @@ pub fn execute_removal(
                     output_lines.push(format!("ERROR: Not removed: {reason}"));
                     output_lines.push(String::new());
                     all_success = false;
+                    continue;
+                }
+
+                if let Some(op) = &cmd.helper {
+                    let (ok, text) = helper::run(op);
+                    output_lines.extend(text.lines().map(str::to_string));
+                    if ok {
+                        output_lines.push("OK".to_string());
+                    } else {
+                        output_lines.push("ERROR: The administrator helper failed".to_string());
+                        all_success = false;
+                    }
+                    output_lines.push(String::new());
                     continue;
                 }
 

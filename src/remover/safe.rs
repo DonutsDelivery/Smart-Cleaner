@@ -1,19 +1,16 @@
 //! Guards for destructive commands.
 //!
 //! The app never builds a shell string out of a path or a package name. Commands
-//! are argv lists, privileged ones go through `pkexec <absolute program> <args>`,
-//! and every path handed to `rm` is resolved and checked first.
+//! are argv lists, and every path handed to `rm` is resolved and checked first.
+//! Nothing here runs as root: privileged work goes to `donutcleaner-helper`
+//! through [`crate::remover::helper`].
 
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
-pub const PKEXEC: &str = "pkexec";
-/// Absolute program paths, so pkexec always runs the system binary.
-pub const RM: &str = "/usr/bin/rm";
 pub const PACMAN: &str = "/usr/bin/pacman";
 pub const PACCACHE: &str = "/usr/bin/paccache";
-pub const JOURNALCTL: &str = "/usr/bin/journalctl";
 
 /// Directories that are never removed, whatever asks for it.
 const PROTECTED_DIRS: &[&str] = &[
@@ -159,28 +156,8 @@ pub fn contents_of(dir: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 /// Program and arguments for `rm -rf -- <paths>`, one argument per path.
-pub fn rm_command(privileged: bool, paths: &[PathBuf]) -> (String, Vec<String>) {
+pub fn rm_command(paths: &[PathBuf]) -> (String, Vec<String>) {
     let mut args = vec!["-rf".to_string(), "--".to_string()];
     args.extend(paths.iter().map(|p| p.to_string_lossy().into_owned()));
-    let program = if privileged { RM } else { "rm" };
-    (program.to_string(), args)
-}
-
-/// Final argv for a command: `pkexec <program> <args>` when privileged.
-pub fn argv(privileged: bool, program: &str, args: &[String]) -> (String, Vec<String>) {
-    if privileged {
-        let mut full = vec![program.to_string()];
-        full.extend(args.iter().cloned());
-        (PKEXEC.to_string(), full)
-    } else {
-        (program.to_string(), args.to_vec())
-    }
-}
-
-/// Build the process for a command from [`argv`].
-pub fn command(privileged: bool, program: &str, args: &[String]) -> std::process::Command {
-    let (program, args) = argv(privileged, program, args);
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args);
-    cmd
+    ("rm".to_string(), args)
 }

@@ -1,12 +1,12 @@
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::process::Command;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::gio;
 use gtk::glib;
 
-use crate::remover::safe;
+use crate::remover::{helper, safe};
 use crate::scanner::maintenance::{self, MaintenanceItem, Prepared};
 
 pub struct MaintenanceView {
@@ -170,43 +170,25 @@ impl MaintenanceView {
                     let total = checked.len();
                     let results = gio::spawn_blocking(move || {
                         let mut outputs: Vec<(String, bool, String)> = Vec::new();
-                        // Privileged removals share one pkexec call (one auth prompt).
-                        let mut root_labels: Vec<String> = Vec::new();
-                        let mut root_paths: Vec<PathBuf> = Vec::new();
 
                         for item in &checked {
                             let label = item.label.clone();
                             match item.action.prepare() {
                                 Err(e) => outputs.push((label, false, e)),
                                 Ok(None) => outputs.push((label, true, String::new())),
-                                Ok(Some(Prepared::Remove {
-                                    privileged: true,
-                                    paths,
-                                })) => {
-                                    root_labels.push(label);
-                                    root_paths.extend(paths);
-                                }
-                                Ok(Some(Prepared::Remove { privileged, paths })) => {
-                                    let (program, args) = safe::rm_command(privileged, &paths);
-                                    let (ok, err) = run_command(privileged, &program, &args);
+                                Ok(Some(Prepared::Remove { paths })) => {
+                                    let (program, args) = safe::rm_command(&paths);
+                                    let (ok, err) = run_command(&program, &args);
                                     outputs.push((label, ok, err));
                                 }
-                                Ok(Some(Prepared::Exec {
-                                    privileged,
-                                    program,
-                                    args,
-                                })) => {
-                                    let (ok, err) = run_command(privileged, &program, &args);
+                                Ok(Some(Prepared::Exec { program, args })) => {
+                                    let (ok, err) = run_command(&program, &args);
                                     outputs.push((label, ok, err));
                                 }
-                            }
-                        }
-
-                        if !root_labels.is_empty() {
-                            let (program, args) = safe::rm_command(true, &root_paths);
-                            let (ok, err) = run_command(true, &program, &args);
-                            for label in root_labels {
-                                outputs.push((label, ok, err.clone()));
+                                Ok(Some(Prepared::Helper(op))) => {
+                                    let (ok, err) = helper::run(&op);
+                                    outputs.push((label, ok, err));
+                                }
                             }
                         }
 
@@ -246,14 +228,11 @@ impl MaintenanceView {
     }
 }
 
-/// Run one command as an argv list (through `pkexec` when privileged) and report
-/// success plus an error message. No shell is involved.
-fn run_command(privileged: bool, program: &str, args: &[String]) -> (bool, String) {
-    eprintln!(
-        "CLEAN [{}]: {program} {args:?}",
-        if privileged { "root" } else { "user" }
-    );
-    match safe::command(privileged, program, args).output() {
+/// Run one command as the current user from an argv list and report success plus
+/// an error message. No shell is involved.
+fn run_command(program: &str, args: &[String]) -> (bool, String) {
+    eprintln!("CLEAN [user]: {program} {args:?}");
+    match Command::new(program).args(args).output() {
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             eprintln!(
@@ -261,11 +240,7 @@ fn run_command(privileged: bool, program: &str, args: &[String]) -> (bool, Strin
                 output.status,
                 stderr.chars().take(200).collect::<String>()
             );
-            // pkexec exits 126 when the user dismisses the prompt, 127 when not authorized.
-            match output.status.code() {
-                Some(126) | Some(127) if privileged => (false, "Authorization cancelled".into()),
-                _ => (output.status.success(), stderr),
-            }
+            (output.status.success(), stderr)
         }
         Err(e) => {
             eprintln!("  spawn error: {e}");

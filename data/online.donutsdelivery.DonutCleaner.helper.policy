@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>DonutsDelivery</vendor>
+  <vendor_url>https://github.com/DonutsDelivery/Smart-Cleaner</vendor_url>
+  <icon_name>online.donutsdelivery.DonutCleaner</icon_name>
+
+  <!-- DonutCleaner starts this as `pkexec /usr/lib/donutcleaner/donutcleaner-helper <operation> ...`.
+       The helper accepts a fixed list of operations and refuses everything else. The path
+       below must match HELPER_PATH in src/ops.rs. -->
+  <action id="online.donutsdelivery.DonutCleaner.helper">
+    <description>Clean up the system with DonutCleaner</description>
+    <message>Authentication is required for DonutCleaner to remove packages and clean system files</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/donutcleaner/donutcleaner-helper</annotate>
+  </action>
+</policyconfig>

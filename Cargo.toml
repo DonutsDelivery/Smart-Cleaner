@@ -1,14 +1,22 @@
 [package]
 name = "donutcleaner"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Clean caches and remove unused packages on Linux"
 license = "MIT"
 repository = "https://github.com/DonutsDelivery/Smart-Cleaner"
 
+[lib]
+name = "donutcleaner_ops"
+path = "src/ops.rs"
+
 [[bin]]
 name = "donutcleaner"
 path = "src/main.rs"
+
+[[bin]]
+name = "donutcleaner-helper"
+path = "src/helper.rs"
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.11" }

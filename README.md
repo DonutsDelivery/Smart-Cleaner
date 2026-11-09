@@ -14,9 +14,22 @@ System package cleanup (pacman cache, orphaned packages, package removal) works 
 
 ## Administrator rights
 
-Anything that needs root runs through polkit as a plain program call (`pkexec /usr/bin/rm`, `/usr/bin/pacman`, `/usr/bin/paccache`, `/usr/bin/journalctl`), never through a shell. Paths are resolved and checked before they are passed to `rm`.
+DonutCleaner never runs `rm`, `pacman` or a shell as root. Root work goes to a small separate program, `donutcleaner-helper`, installed at `/usr/lib/donutcleaner/donutcleaner-helper` and started with `pkexec`. It has its own polkit action, `online.donutsdelivery.DonutCleaner.helper`, so the password prompt names DonutCleaner and the authorization is kept for a few minutes (`auth_admin_keep`).
+
+The helper accepts seven operations and nothing else:
+
+- `paccache-all` and `paccache-uninstalled` clear the pacman cache.
+- `journal-vacuum` trims the systemd journal to one week.
+- `clear-dir debtap-cache|coredumps` empties `/var/cache/debtap` or `/var/lib/systemd/coredump`.
+- `remove-orphans` removes the packages `pacman -Qdtq` lists.
+- `remove-packages <name>...` runs `pacman -Rns` on installed packages. Protected system packages are refused.
+- `remove-paths <path>...` removes direct children of `/opt`, `/usr/local/bin` and `/usr/local/sbin` that no pacman package owns.
+
+Package names are checked against pacman's character set, paths must be absolute and already normalized, and the helper starts its tools by absolute path with an empty environment. Symlinks are removed as links and never followed.
 
 ## Download
+
+**Arch Linux (AUR):** `donutcleaner` builds from source, `donutcleaner-bin` installs the release binary. Both install the helper and the polkit policy.
 
 **Tarball:**
 ```bash
@@ -26,12 +39,14 @@ cd donutcleaner
 ./donutcleaner
 ```
 
-**Standalone binary:**
+Root actions need the helper and the policy in system paths. Install them once:
+
 ```bash
-curl -LO https://github.com/DonutsDelivery/Smart-Cleaner/releases/latest/download/donutcleaner-x86_64
-chmod +x donutcleaner-x86_64
-./donutcleaner-x86_64
+sudo install -Dm755 donutcleaner-helper /usr/lib/donutcleaner/donutcleaner-helper
+sudo install -Dm644 online.donutsdelivery.DonutCleaner.helper.policy /usr/share/polkit-1/actions/online.donutsdelivery.DonutCleaner.helper.policy
 ```
+
+**Standalone binary:** `donutcleaner-x86_64` has no helper. Take `donutcleaner-helper` and the policy from the tarball and install them as above, or user-level cleanup (caches in your home directory, Flatpak, Cargo, npm, pip) still works without them.
 
 ## Dependencies
 
@@ -45,7 +60,7 @@ chmod +x donutcleaner-x86_64
 # Install build dependencies (Arch Linux)
 sudo pacman -S gtk4 libadwaita rust
 
-# Build and install
+# Build and install (asks for sudo to place the helper and policy under /usr)
 make install
 ```
 

@@ -37,15 +37,16 @@ jobs:
       - name: Build
         run: cargo build --release
 
-      - name: Verify binary
-        run: ls -la target/release/donutcleaner
+      - name: Verify binaries
+        run: ls -la target/release/donutcleaner target/release/donutcleaner-helper
 
       - name: Package tarball
         run: |
           mkdir -p dist/donutcleaner
-          cp target/release/donutcleaner dist/donutcleaner/
+          cp target/release/donutcleaner target/release/donutcleaner-helper dist/donutcleaner/
           cp data/online.donutsdelivery.DonutCleaner.desktop dist/donutcleaner/
           cp data/online.donutsdelivery.DonutCleaner.metainfo.xml dist/donutcleaner/
+          cp data/online.donutsdelivery.DonutCleaner.helper.policy dist/donutcleaner/
           cp icons/online.donutsdelivery.DonutCleaner.svg dist/donutcleaner/
           cp -r icons/hicolor dist/donutcleaner/
           cp README.md LICENSE dist/donutcleaner/

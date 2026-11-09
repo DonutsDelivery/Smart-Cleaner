@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use super::package::PackageInfo;
 use super::package_source::PackageSource;
-use crate::remover::safe;
+use donutcleaner_ops::{MAX_PACKAGES, MAX_PATHS, Op, check_package_name, is_protected_package};
+
+use crate::remover::{helper, safe};
 
 /// Groups packages by source for removal
 pub struct RemovalPlan {
@@ -55,21 +57,29 @@ impl RemovalPlan {
         for (source, pkgs) in &self.groups {
             match source {
                 PackageSource::Pacman | PackageSource::Aur => {
-                    let names: Vec<String> = pkgs.iter().map(|p| p.name.clone()).collect();
-                    // "--" keeps a name that starts with "-" from being read as an option.
-                    let mut args = vec![
-                        "-Rns".to_string(),
-                        "--noconfirm".to_string(),
-                        "--".to_string(),
-                    ];
-                    args.extend(names.clone());
-                    cmds.push(RemovalCommand::new(
-                        *source,
-                        true,
-                        safe::PACMAN,
-                        args,
-                        names,
-                    ));
+                    let mut names: Vec<String> = Vec::new();
+                    for pkg in pkgs {
+                        // The root helper checks these again. Refusing here keeps one bad
+                        // name from sinking the whole batch.
+                        if let Err(reason) = check_package_name(&pkg.name) {
+                            cmds.push(RemovalCommand::refused(*source, pkg.name.clone(), reason));
+                        } else if is_protected_package(&pkg.name) {
+                            cmds.push(RemovalCommand::refused(
+                                *source,
+                                pkg.name.clone(),
+                                format!("{} is a protected system package", pkg.name),
+                            ));
+                        } else {
+                            names.push(pkg.name.clone());
+                        }
+                    }
+                    for chunk in names.chunks(MAX_PACKAGES) {
+                        cmds.push(RemovalCommand::helper(
+                            *source,
+                            Op::RemovePackages(chunk.to_vec()),
+                            chunk.to_vec(),
+                        ));
+                    }
                 }
                 PackageSource::Flatpak => {
                     for pkg in pkgs {
@@ -85,11 +95,12 @@ impl RemovalPlan {
                             ],
                             packages: vec![pkg.name.clone()],
                             refused: None,
+                            helper: None,
                         });
                     }
                 }
                 PackageSource::AppImage | PackageSource::Wine | PackageSource::Desktop => {
-                    let mut root_paths: Vec<PathBuf> = Vec::new();
+                    let mut root_paths: Vec<String> = Vec::new();
                     let mut root_names: Vec<String> = Vec::new();
                     let mut user_paths: Vec<PathBuf> = Vec::new();
                     let mut user_names: Vec<String> = Vec::new();
@@ -110,30 +121,58 @@ impl RemovalPlan {
                                 continue;
                             }
                         };
-                        let needs_root = path.starts_with("/opt")
-                            || path.starts_with("/usr")
+                        if path.starts_with("/opt") || path.starts_with("/usr/local") {
+                            // Root work goes to the helper, which only accepts direct children
+                            // of /opt, /usr/local/bin and /usr/local/sbin.
+                            match path.to_str().map(|p| Op::parse(&["remove-paths".into(), p.into()])) {
+                                Some(Ok(_)) => {
+                                    let text = path.to_string_lossy().into_owned();
+                                    if !root_paths.contains(&text) {
+                                        root_paths.push(text);
+                                        root_names.push(pkg.name.clone());
+                                    }
+                                }
+                                _ => cmds.push(RemovalCommand::refused(
+                                    *source,
+                                    pkg.name.clone(),
+                                    format!(
+                                        "{} is not directly inside /opt, /usr/local/bin or /usr/local/sbin, \
+                                         so the administrator helper will not remove it",
+                                        path.display()
+                                    ),
+                                )),
+                            }
+                        } else if path.starts_with("/usr")
                             || path.starts_with("/bin")
-                            || path.starts_with("/sbin");
-                        if needs_root {
-                            root_paths.push(path);
-                            root_names.push(pkg.name.clone());
+                            || path.starts_with("/sbin")
+                        {
+                            cmds.push(RemovalCommand::refused(
+                                *source,
+                                pkg.name.clone(),
+                                format!(
+                                    "{} is a system location, remove it with the package manager",
+                                    path.display()
+                                ),
+                            ));
                         } else {
                             user_paths.push(path);
                             user_names.push(pkg.name.clone());
                         }
                     }
 
-                    if !root_paths.is_empty() {
-                        let (program, args) = safe::rm_command(true, &root_paths);
-                        cmds.push(RemovalCommand::new(
-                            *source, true, &program, args, root_names,
+                    for (chunk, names) in root_paths
+                        .chunks(MAX_PATHS)
+                        .zip(root_names.chunks(MAX_PATHS))
+                    {
+                        cmds.push(RemovalCommand::helper(
+                            *source,
+                            Op::RemovePaths(chunk.to_vec()),
+                            names.to_vec(),
                         ));
                     }
                     if !user_paths.is_empty() {
-                        let (program, args) = safe::rm_command(false, &user_paths);
-                        cmds.push(RemovalCommand::new(
-                            *source, false, &program, args, user_names,
-                        ));
+                        let (program, args) = safe::rm_command(&user_paths);
+                        cmds.push(RemovalCommand::new(*source, &program, args, user_names));
                     }
                 }
                 PackageSource::Snap => {
@@ -145,6 +184,7 @@ impl RemovalPlan {
                             args: vec!["remove".to_string(), "--".to_string(), pkg.name.clone()],
                             packages: vec![pkg.name.clone()],
                             refused: None,
+                            helper: None,
                         });
                     }
                 }
@@ -160,6 +200,7 @@ impl RemovalPlan {
                         args,
                         packages: names,
                         refused: None,
+                        helper: None,
                     });
                 }
                 PackageSource::Npm => {
@@ -174,6 +215,7 @@ impl RemovalPlan {
                         args,
                         packages: names,
                         refused: None,
+                        helper: None,
                     });
                 }
                 PackageSource::Cargo => {
@@ -185,6 +227,7 @@ impl RemovalPlan {
                             args: vec!["uninstall".to_string(), "--".to_string(), pkg.name.clone()],
                             packages: vec![pkg.name.clone()],
                             refused: None,
+                            helper: None,
                         });
                     }
                 }
@@ -199,27 +242,21 @@ pub struct RemovalCommand {
     pub source: PackageSource,
     /// Human-readable display string
     pub display: String,
-    /// Program to execute
+    /// Program to execute (ignored when `helper` is set)
     pub program: String,
     /// Arguments (each element is one argument, handles spaces correctly)
     pub args: Vec<String>,
     pub packages: Vec<String>,
     /// Set when the target failed a safety check. The executor reports it and runs nothing.
     pub refused: Option<String>,
+    /// Set when the command needs root. The executor sends it to `donutcleaner-helper`.
+    pub helper: Option<Op>,
 }
 
 impl RemovalCommand {
-    /// Build a command from a program and its arguments. A privileged command runs as
-    /// `pkexec <program> <args>`; `display` shows exactly that argv.
-    pub fn new(
-        source: PackageSource,
-        privileged: bool,
-        program: &str,
-        args: Vec<String>,
-        packages: Vec<String>,
-    ) -> Self {
-        let (program, args) = safe::argv(privileged, program, &args);
-        let display = std::iter::once(program.as_str())
+    /// A command that runs as the current user.
+    pub fn new(source: PackageSource, program: &str, args: Vec<String>, packages: Vec<String>) -> Self {
+        let display = std::iter::once(program)
             .chain(args.iter().map(String::as_str))
             .map(|a| {
                 if a.contains(char::is_whitespace) {
@@ -233,10 +270,24 @@ impl RemovalCommand {
         Self {
             source,
             display,
-            program,
+            program: program.to_string(),
             args,
             packages,
             refused: None,
+            helper: None,
+        }
+    }
+
+    /// A command that runs as root through the helper.
+    pub fn helper(source: PackageSource, op: Op, packages: Vec<String>) -> Self {
+        Self {
+            source,
+            display: helper::display(&op),
+            program: String::new(),
+            args: Vec::new(),
+            packages,
+            refused: None,
+            helper: Some(op),
         }
     }
 
@@ -249,6 +300,7 @@ impl RemovalCommand {
             args: Vec::new(),
             packages: vec![package],
             refused: Some(reason),
+            helper: None,
         }
     }
 }

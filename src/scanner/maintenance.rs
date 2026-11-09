@@ -2,109 +2,65 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use donutcleaner_ops::{CleanDir, Op};
+
 use crate::remover::safe;
 
 /// What to do for one cleanup item. Nothing here is a shell string: programs and
 /// arguments stay separate, and paths are checked again right before they are removed.
+/// Anything that needs root is an [`Op`] for the `donutcleaner-helper` program.
 #[derive(Debug, Clone)]
 pub enum CleanAction {
-    /// Run a fixed program with fixed arguments.
+    /// Run a fixed program with fixed arguments, as the current user.
     Run {
         program: &'static str,
         args: Vec<String>,
-        privileged: bool,
     },
     /// Remove these paths. Each must resolve to somewhere strictly inside `root`.
-    RemovePaths {
-        root: PathBuf,
-        paths: Vec<PathBuf>,
-        privileged: bool,
-    },
+    RemovePaths { root: PathBuf, paths: Vec<PathBuf> },
     /// Remove everything inside `dir` but keep `dir` itself.
-    RemoveContents { dir: PathBuf, privileged: bool },
-    /// Remove the packages `pacman -Qdtq` lists at the time of cleaning.
-    RemoveOrphans,
+    RemoveContents { dir: PathBuf },
+    /// Ask the root helper to do it.
+    Helper(Op),
 }
 
 /// A command ready to run, produced from a [`CleanAction`] just before execution.
 #[derive(Debug)]
 pub enum Prepared {
-    /// `rm -rf -- <paths>`, already validated.
-    Remove {
-        privileged: bool,
-        paths: Vec<PathBuf>,
-    },
-    Exec {
-        privileged: bool,
-        program: String,
-        args: Vec<String>,
-    },
+    /// `rm -rf -- <paths>` as the current user, already validated.
+    Remove { paths: Vec<PathBuf> },
+    Exec { program: String, args: Vec<String> },
+    Helper(Op),
 }
 
 impl CleanAction {
     /// Validate and expand the action. `Ok(None)` means there is nothing left to do.
     pub fn prepare(&self) -> Result<Option<Prepared>, String> {
         match self {
-            CleanAction::Run {
-                program,
-                args,
-                privileged,
-            } => Ok(Some(Prepared::Exec {
-                privileged: *privileged,
+            CleanAction::Run { program, args } => Ok(Some(Prepared::Exec {
                 program: (*program).to_string(),
                 args: args.clone(),
             })),
-            CleanAction::RemovePaths {
-                root,
-                paths,
-                privileged,
-            } => {
+            CleanAction::RemovePaths { root, paths } => {
                 let mut checked = Vec::new();
                 for path in paths {
                     if let Some(p) = safe::check_inside(root, path)? {
                         checked.push(p);
                     }
                 }
-                Ok(removal(*privileged, checked))
+                Ok(removal(checked))
             }
-            CleanAction::RemoveContents { dir, privileged } => {
-                Ok(removal(*privileged, safe::contents_of(dir)?))
-            }
-            CleanAction::RemoveOrphans => {
-                let output = Command::new("pacman")
-                    .arg("-Qdtq")
-                    .output()
-                    .map_err(|e| format!("cannot run pacman: {e}"))?;
-                let names: Vec<String> = String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .map(str::trim)
-                    .filter(|l| !l.is_empty() && !l.starts_with('-'))
-                    .map(str::to_string)
-                    .collect();
-                if names.is_empty() {
-                    return Ok(None);
-                }
-                let mut args = vec![
-                    "-Rns".to_string(),
-                    "--noconfirm".to_string(),
-                    "--".to_string(),
-                ];
-                args.extend(names);
-                Ok(Some(Prepared::Exec {
-                    privileged: true,
-                    program: safe::PACMAN.to_string(),
-                    args,
-                }))
-            }
+            CleanAction::RemoveContents { dir } => Ok(removal(safe::contents_of(dir)?)),
+            CleanAction::Helper(op) => Ok(Some(Prepared::Helper(op.clone()))),
         }
     }
 }
 
-fn removal(privileged: bool, paths: Vec<PathBuf>) -> Option<Prepared> {
+fn removal(paths: Vec<PathBuf>) -> Option<Prepared> {
     if paths.is_empty() {
         None
     } else {
-        Some(Prepared::Remove { privileged, paths })
+        Some(Prepared::Remove { paths })
     }
 }
 
@@ -135,11 +91,7 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 category: "Package manager caches",
                 label: "Pacman cache (remove all versions)".into(),
                 size,
-                action: CleanAction::Run {
-                    program: safe::PACCACHE,
-                    args: vec!["-rk0".into()],
-                    privileged: true,
-                },
+                action: CleanAction::Helper(Op::PaccacheAll),
                 checked: false,
             });
         }
@@ -153,11 +105,7 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             category: "Package manager caches",
             label: "Uninstalled package cache".into(),
             size: uninstalled_size,
-            action: CleanAction::Run {
-                program: safe::PACCACHE,
-                args: vec!["-ruk0".into()],
-                privileged: true,
-            },
+            action: CleanAction::Helper(Op::PaccacheUninstalled),
             checked: false,
         });
     }
@@ -173,7 +121,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 size,
                 action: CleanAction::RemoveContents {
                     dir: yay_cache.clone(),
-                    privileged: false,
                 },
                 checked: false,
             });
@@ -188,10 +135,7 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 category: "Package manager caches",
                 label: "Debtap cache (/var/cache/debtap/)".into(),
                 size,
-                action: CleanAction::RemoveContents {
-                    dir: PathBuf::from("/var/cache/debtap"),
-                    privileged: true,
-                },
+                action: CleanAction::Helper(Op::ClearDir(CleanDir::DebtapCache)),
                 checked: false,
             });
         }
@@ -209,7 +153,7 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             category: "Package manager caches",
             label: "Orphaned packages".into(),
             size: orphan_size,
-            action: CleanAction::RemoveOrphans,
+            action: CleanAction::Helper(Op::RemoveOrphans),
             checked: false,
         });
     }
@@ -225,7 +169,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             action: CleanAction::Run {
                 program: "flatpak",
                 args: vec!["uninstall".into(), "--unused".into(), "-y".into()],
-                privileged: false,
             },
             checked: false,
         });
@@ -246,7 +189,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             action: CleanAction::RemovePaths {
                 root: PathBuf::from(&home).join(".cargo"),
                 paths: vec![cargo_registry.clone(), cargo_git.clone()],
-                privileged: false,
             },
             checked: false,
         });
@@ -265,7 +207,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             action: CleanAction::RemovePaths {
                 root: PathBuf::from(&home).join("Programs"),
                 paths: target_paths,
-                privileged: false,
             },
             checked: false,
         });
@@ -283,7 +224,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 action: CleanAction::Run {
                     program: "npm",
                     args: vec!["cache".into(), "clean".into(), "--force".into()],
-                    privileged: false,
                 },
                 checked: false,
             });
@@ -302,7 +242,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 action: CleanAction::Run {
                     program: "pip",
                     args: vec!["cache".into(), "purge".into()],
-                    privileged: false,
                 },
                 checked: false,
             });
@@ -322,7 +261,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                     action: CleanAction::Run {
                         program: "go",
                         args: vec!["clean".into(), "-cache".into()],
-                        privileged: false,
                     },
                     checked: false,
                 });
@@ -338,7 +276,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 size,
                 action: CleanAction::RemoveContents {
                     dir: go_cache.clone(),
-                    privileged: false,
                 },
                 checked: false,
             });
@@ -357,7 +294,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             action: CleanAction::RemovePaths {
                 root: PathBuf::from(&home).join(".config"),
                 paths: electron_dirs,
-                privileged: false,
             },
             checked: false,
         });
@@ -376,7 +312,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             action: CleanAction::RemovePaths {
                 root: PathBuf::from(&home).join(".cache"),
                 paths: vec![tauri_cache.clone(), temp_tauri.clone()],
-                privileged: false,
             },
             checked: false,
         });
@@ -392,10 +327,7 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 category: "System cruft",
                 label: "Coredumps".into(),
                 size,
-                action: CleanAction::RemoveContents {
-                    dir: PathBuf::from("/var/lib/systemd/coredump"),
-                    privileged: true,
-                },
+                action: CleanAction::Helper(Op::ClearDir(CleanDir::Coredumps)),
                 checked: false,
             });
         }
@@ -409,11 +341,7 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
             category: "System cruft",
             label: "Systemd journal (keep 1 week)".into(),
             size: journal_size,
-            action: CleanAction::Run {
-                program: safe::JOURNALCTL,
-                args: vec!["--vacuum-time=1week".into()],
-                privileged: true,
-            },
+            action: CleanAction::Helper(Op::JournalVacuum),
             checked: false,
         });
     }
@@ -429,7 +357,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 size,
                 action: CleanAction::RemoveContents {
                     dir: thumbs.clone(),
-                    privileged: false,
                 },
                 checked: false,
             });
@@ -448,7 +375,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 // The trash is in the user's home, so no root is needed.
                 action: CleanAction::RemoveContents {
                     dir: trash.clone(),
-                    privileged: false,
                 },
                 checked: false,
             });
@@ -467,7 +393,6 @@ pub fn scan_maintenance_items() -> Vec<MaintenanceItem> {
                 action: CleanAction::Run {
                     program: "docker",
                     args: vec!["image".into(), "prune".into(), "-a".into(), "-f".into()],
-                    privileged: false,
                 },
                 checked: false,
             });

@@ -37,6 +37,11 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.1" date="2026-11-09">
+      <description>
+        <p>Root actions now go through a separate helper with its own polkit action. The helper accepts seven fixed operations and checks every path and package name.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-08">
       <description>
         <p>First release as DonutCleaner, formerly SysClean. Cleanup commands now pass each path as its own argument.</p>
