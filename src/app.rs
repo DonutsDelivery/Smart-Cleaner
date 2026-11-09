@@ -25,6 +25,7 @@ mod imp {
             let app = self.obj();
             let window = Window::new(app.upcast_ref());
             window.present();
+            crate::ui::helper_notice::maybe_show(&window);
         }
     }
 

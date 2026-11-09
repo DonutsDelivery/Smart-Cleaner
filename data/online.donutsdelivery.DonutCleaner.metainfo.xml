@@ -37,6 +37,11 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.2" date="2026-11-09">
+      <description>
+        <p>Adds an AppImage. Copies that cannot install the administrator helper, such as the AppImage, show the install commands on first run.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-11-09">
       <description>
         <p>Root actions now go through a separate helper with its own polkit action. The helper accepts seven fixed operations and checks every path and package name.</p>

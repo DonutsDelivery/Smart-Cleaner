@@ -31,6 +31,13 @@ Package names are checked against pacman's character set, paths must be absolute
 
 **Arch Linux (AUR):** `donutcleaner` builds from source, `donutcleaner-bin` installs the release binary. Both install the helper and the polkit policy.
 
+**AppImage:** `DonutCleaner-x86_64.AppImage` from the release page bundles GTK4 and libadwaita and needs glibc 2.39 or newer. It cannot install the administrator helper, so on first run it shows the commands that extract the helper and the polkit policy from the AppImage and install them as root.
+
+```bash
+chmod +x DonutCleaner-*-x86_64.AppImage
+./DonutCleaner-*-x86_64.AppImage
+```
+
 **Tarball:**
 ```bash
 curl -LO https://github.com/DonutsDelivery/Smart-Cleaner/releases/latest/download/donutcleaner-x86_64.tar.gz
@@ -53,6 +60,10 @@ sudo install -Dm644 online.donutsdelivery.DonutCleaner.helper.policy /usr/share/
 - GTK4
 - libadwaita
 - polkit (for root actions)
+
+## Building the AppImage
+
+`packaging/appimage/Dockerfile` builds an Ubuntu 24.04 image with pinned linuxdeploy tools. Inside it, `packaging/appimage/build.sh` expects the source at `/src` and writes the AppImage and its `.zsync` file to `/out`.
 
 ## Building from source
 
